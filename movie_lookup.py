@@ -19,6 +19,8 @@ RAPIDAPI_KEY = st.secrets.get("RAPIDAPI_KEY", "")
 OMDB_URL = "http://www.omdbapi.com/"
 STREAMING_BASE_URL = "https://streaming-availability.p.rapidapi.com/shows/"
 
+NO_POSTER = "https://via.placeholder.com/120x178/1a1a2e/555?text=No+Poster"
+
 # ---- Custom CSS ----
 st.markdown("""
 <style>
@@ -157,16 +159,42 @@ st.markdown("""
         padding: 2rem;
     }
 
+    .results-label {
+        font-family: 'Inter', sans-serif;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.6rem;
+    }
+
     div[data-testid="stTextInput"] label { display: none; }
 </style>
 """, unsafe_allow_html=True)
 
 
-def fetch_movie_info(title):
-    """Fetch movie details from OMDB."""
+# ---- API Functions ----
+
+def fetch_search_results(query):
+    """Search OMDB for multiple matching titles."""
     resp = requests.get(
         OMDB_URL,
-        params={"t": title, "apikey": OMDB_API_KEY, "plot": "short"},
+        params={"s": query, "apikey": OMDB_API_KEY, "type": "movie"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("Response") == "False":
+        return []
+    return data.get("Search", [])
+
+
+def fetch_movie_by_id(imdb_id):
+    """Fetch full movie details by IMDB ID."""
+    resp = requests.get(
+        OMDB_URL,
+        params={"i": imdb_id, "apikey": OMDB_API_KEY, "plot": "short"},
         timeout=10,
     )
     resp.raise_for_status()
@@ -303,6 +331,73 @@ def render_streaming_chips(options):
     return '<div class="streaming-grid">' + "".join(chips) + '</div>'
 
 
+def render_detail_card(omdb, streaming_opts):
+    """Render the full movie detail card."""
+    title = omdb.get("Title", "N/A")
+    plot = truncate_plot(omdb.get("Plot", "N/A"))
+    released = omdb.get("Released", "N/A")
+    year = omdb.get("Year", "")
+    rated = omdb.get("Rated", "")
+    runtime = omdb.get("Runtime", "")
+    genre = omdb.get("Genre", "")
+    director = omdb.get("Director", "")
+    imdb_rating = omdb.get("imdbRating", "")
+    poster = omdb.get("Poster", "")
+
+    meta_parts = []
+    if year:
+        meta_parts.append(year)
+    if rated and rated != "N/A":
+        meta_parts.append(rated)
+    if runtime and runtime != "N/A":
+        meta_parts.append(runtime)
+    if genre:
+        meta_parts.append(genre)
+
+    rating_html = ""
+    if imdb_rating and imdb_rating != "N/A":
+        rating_html = f'<span class="rating-badge">IMDb {imdb_rating}</span>'
+
+    director_html = ""
+    if director and director != "N/A":
+        director_html = f'<div style="margin-bottom:0.8rem;"><span style="color:#aaa;">Directed by {director}</span></div>'
+
+    meta_html = " &bull; ".join(f"<span>{p}</span>" for p in meta_parts)
+    streaming_html = render_streaming_chips(streaming_opts)
+
+    poster_html = ""
+    if poster and poster != "N/A":
+        poster_html = f'<img src="{poster}" style="width:140px; height:auto; border-radius:10px; object-fit:cover; flex-shrink:0;" />'
+
+    return f"""
+    <div class="movie-card">
+        <div style="display:flex; gap:1.5rem;">
+            {poster_html}
+            <div style="flex:1; min-width:0;">
+                <div class="movie-title">{title}</div>
+                <div class="movie-meta">{rating_html} {meta_html}</div>
+                {director_html}
+                <div class="section-label">Synopsis</div>
+                <div class="synopsis">{plot}</div>
+                <div class="section-label">Theatrical Release</div>
+                <div class="synopsis">{released}</div>
+            </div>
+        </div>
+        <div class="section-label" style="margin-top:1.4rem;">Streaming Options</div>
+        {streaming_html}
+    </div>
+    """
+
+
+# ---- Session State ----
+if "search_results" not in st.session_state:
+    st.session_state.search_results = []
+if "selected_id" not in st.session_state:
+    st.session_state.selected_id = None
+if "search_query" not in st.session_state:
+    st.session_state.search_query = ""
+
+
 # ---- Streamlit UI ----
 st.markdown(
     '<div class="app-header">'
@@ -318,83 +413,65 @@ with col1:
 with col2:
     search_clicked = st.button("Search", use_container_width=True)
 
-if search_clicked or (movie_name and st.session_state.get("_last_search") != movie_name):
-    if not movie_name or not movie_name.strip():
-        pass
-    elif not OMDB_API_KEY:
+# Handle new search
+if search_clicked and movie_name and movie_name.strip():
+    if not OMDB_API_KEY:
         st.error("Set your OMDB API key in .streamlit/secrets.toml")
     else:
-        st.session_state["_last_search"] = movie_name
         with st.spinner(""):
             try:
-                omdb = fetch_movie_info(movie_name)
-                if omdb.get("Response") == "False":
-                    st.markdown('<p class="no-results">No movie found. Try a different title.</p>', unsafe_allow_html=True)
-                else:
-                    title = omdb.get("Title", "N/A")
-                    plot = truncate_plot(omdb.get("Plot", "N/A"))
-                    released = omdb.get("Released", "N/A")
-                    year = omdb.get("Year", "")
-                    rated = omdb.get("Rated", "")
-                    runtime = omdb.get("Runtime", "")
-                    genre = omdb.get("Genre", "")
-                    director = omdb.get("Director", "")
-                    imdb_rating = omdb.get("imdbRating", "")
-                    poster = omdb.get("Poster", "")
-                    imdb_id = omdb.get("imdbID")
-
-                    streaming_data = fetch_streaming(imdb_id) if imdb_id else None
-                    streaming_opts = parse_streaming(streaming_data)
-
-                    # Build card
-                    meta_parts = []
-                    if year:
-                        meta_parts.append(year)
-                    if rated and rated != "N/A":
-                        meta_parts.append(rated)
-                    if runtime and runtime != "N/A":
-                        meta_parts.append(runtime)
-                    if genre:
-                        meta_parts.append(genre)
-
-                    rating_html = ""
-                    if imdb_rating and imdb_rating != "N/A":
-                        rating_html = f'<span class="rating-badge">IMDb {imdb_rating}</span>'
-
-                    director_html = ""
-                    if director and director != "N/A":
-                        director_html = f'<span style="color:#aaa;">Directed by {director}</span>'
-
-                    meta_html = " &bull; ".join(f"<span>{p}</span>" for p in meta_parts)
-
-                    streaming_html = render_streaming_chips(streaming_opts)
-
-                    card_html = f"""
-                    <div class="movie-card">
-                        <div style="display:flex; gap:1.5rem;">
-                    """
-
-                    if poster and poster != "N/A":
-                        card_html += f'<img src="{poster}" style="width:140px; height:auto; border-radius:10px; object-fit:cover; flex-shrink:0;" />'
-
-                    card_html += f"""
-                            <div style="flex:1; min-width:0;">
-                                <div class="movie-title">{title}</div>
-                                <div class="movie-meta">{rating_html} {meta_html}</div>
-                                {f'<div style="margin-bottom:0.8rem;">{director_html}</div>' if director_html else ''}
-                                <div class="section-label">Synopsis</div>
-                                <div class="synopsis">{plot}</div>
-                                <div class="section-label">Theatrical Release</div>
-                                <div class="synopsis">{released}</div>
-                            </div>
-                        </div>
-                        <div class="section-label" style="margin-top:1.4rem;">Streaming Options</div>
-                        {streaming_html}
-                    </div>
-                    """
-                    st.markdown(card_html, unsafe_allow_html=True)
-
-            except requests.exceptions.RequestException:
+                results = fetch_search_results(movie_name.strip())
+                st.session_state.search_results = results
+                st.session_state.selected_id = None
+                st.session_state.search_query = movie_name.strip()
+            except Exception:
                 st.error("Could not connect. Check your internet and API keys.")
-            except Exception as e:
-                st.error(f"Error: {e}")
+                st.session_state.search_results = []
+
+# ---- Detail View ----
+if st.session_state.selected_id:
+    if st.button("← Back to results"):
+        st.session_state.selected_id = None
+        st.rerun()
+
+    with st.spinner(""):
+        try:
+            omdb = fetch_movie_by_id(st.session_state.selected_id)
+            if omdb.get("Response") == "False":
+                st.markdown('<p class="no-results">Could not load movie details.</p>', unsafe_allow_html=True)
+            else:
+                imdb_id = omdb.get("imdbID")
+                streaming_data = fetch_streaming(imdb_id) if imdb_id else None
+                streaming_opts = parse_streaming(streaming_data)
+                st.markdown(render_detail_card(omdb, streaming_opts), unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Error loading details: {e}")
+
+# ---- Results Grid ----
+elif st.session_state.search_results:
+    results = st.session_state.search_results
+    count = len(results)
+    st.markdown(
+        f'<p class="results-label">{count} result{"s" if count != 1 else ""} for "{st.session_state.search_query}"</p>',
+        unsafe_allow_html=True,
+    )
+
+    # Show results in rows of 5
+    for row_start in range(0, len(results), 5):
+        row = results[row_start:row_start + 5]
+        cols = st.columns(5)
+        for i, movie in enumerate(row):
+            with cols[i]:
+                poster = movie.get("Poster", "")
+                if poster and poster != "N/A":
+                    st.image(poster, use_container_width=True)
+                else:
+                    st.image(NO_POSTER, use_container_width=True)
+                year = movie.get("Year", "")
+                st.caption(f'**{movie.get("Title", "?")}**  \n{year}')
+                if st.button("Select", key=f"sel_{row_start + i}", use_container_width=True):
+                    st.session_state.selected_id = movie.get("imdbID")
+                    st.rerun()
+
+elif st.session_state.search_query:
+    st.markdown('<p class="no-results">No movies found. Try a different title.</p>', unsafe_allow_html=True)
