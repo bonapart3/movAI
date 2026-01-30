@@ -35,7 +35,7 @@ def fetch_streaming(imdb_id):
         return None
     try:
         resp = requests.get(
-            f"{STREAMING_BASE_URL}movie/{imdb_id}",
+            f"{STREAMING_BASE_URL}{imdb_id}",
             headers={
                 "X-RapidAPI-Key": RAPIDAPI_KEY,
                 "X-RapidAPI-Host": "streaming-availability.p.rapidapi.com",
@@ -73,8 +73,12 @@ def format_streaming(data):
             continue
 
         price_obj = opt.get("price")
-        price_formatted = price_obj.get("formatted", "") if price_obj else ""
         price_amount = float(price_obj.get("amount", 0)) if price_obj and "amount" in price_obj else None
+        if price_amount is not None:
+            currency = price_obj.get("currency", "USD")
+            price_formatted = f"${price_amount:.2f}" if currency == "USD" else f"{price_amount:.2f} {currency}"
+        else:
+            price_formatted = ""
 
         # Parse availability date if present
         date_str = ""
