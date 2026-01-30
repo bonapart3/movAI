@@ -10,13 +10,9 @@ import streamlit as st
 import requests
 from datetime import datetime
 
-# ---- INSERT YOUR OMDB API KEY HERE ----
-# Get a free key at https://www.omdbapi.com/apikey.aspx
-OMDB_API_KEY = "YOUR_API_KEY_HERE"  # Or use st.secrets["OMDB_API_KEY"]
-
-# ---- INSERT YOUR RAPIDAPI KEY HERE ----
-# Sign up (free tier) at https://rapidapi.com/movie-of-the-night-movie-of-the-night-default/api/streaming-availability
-RAPIDAPI_KEY = "YOUR_API_KEY_HERE"  # Or use st.secrets["RAPIDAPI_KEY"]
+# API keys loaded from .streamlit/secrets.toml (local) or Streamlit Cloud secrets
+OMDB_API_KEY = st.secrets.get("OMDB_API_KEY", "")
+RAPIDAPI_KEY = st.secrets.get("RAPIDAPI_KEY", "")
 
 OMDB_URL = "http://www.omdbapi.com/"
 STREAMING_BASE_URL = "https://streaming-availability.p.rapidapi.com/shows/"
@@ -35,7 +31,7 @@ def fetch_movie_info(title):
 
 def fetch_streaming(imdb_id):
     """Fetch streaming availability using IMDB ID."""
-    if RAPIDAPI_KEY == "YOUR_API_KEY_HERE":
+    if not RAPIDAPI_KEY:
         return None
     try:
         resp = requests.get(
@@ -145,8 +141,8 @@ movie_name = st.text_input("Enter Movie Name:")
 if st.button("Search"):
     if not movie_name.strip():
         st.write("Enter a movie name.")
-    elif OMDB_API_KEY == "YOUR_API_KEY_HERE":
-        st.write("Error: Please set your OMDB API key in the script or secrets.")
+    elif not OMDB_API_KEY:
+        st.write("Error: Please set your OMDB API key in .streamlit/secrets.toml")
     else:
         with st.spinner("Searching..."):
             try:
