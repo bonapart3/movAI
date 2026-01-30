@@ -35,7 +35,7 @@ def fetch_streaming(imdb_id):
         return None
     try:
         resp = requests.get(
-            f"{STREAMING_BASE_URL}{imdb_id}",
+            f"{STREAMING_BASE_URL}movie/{imdb_id}",
             headers={
                 "X-RapidAPI-Key": RAPIDAPI_KEY,
                 "X-RapidAPI-Host": "streaming-availability.p.rapidapi.com",
