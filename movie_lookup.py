@@ -10,12 +10,156 @@ import streamlit as st
 import requests
 from datetime import datetime
 
+st.set_page_config(page_title="movAI", page_icon="🎬", layout="centered")
+
 # API keys loaded from .streamlit/secrets.toml (local) or Streamlit Cloud secrets
 OMDB_API_KEY = st.secrets.get("OMDB_API_KEY", "")
 RAPIDAPI_KEY = st.secrets.get("RAPIDAPI_KEY", "")
 
 OMDB_URL = "http://www.omdbapi.com/"
 STREAMING_BASE_URL = "https://streaming-availability.p.rapidapi.com/shows/"
+
+# ---- Custom CSS ----
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    .block-container { max-width: 800px; padding-top: 2rem; }
+
+    .app-header {
+        text-align: center;
+        padding: 1.5rem 0 0.5rem 0;
+    }
+    .app-header h1 {
+        font-family: 'Inter', sans-serif;
+        font-size: 2.4rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0.2rem;
+    }
+    .app-header p {
+        color: #888;
+        font-size: 0.95rem;
+        font-family: 'Inter', sans-serif;
+    }
+
+    .movie-card {
+        background: linear-gradient(145deg, #1a1a2e 0%, #16213e 100%);
+        border: 1px solid #2a2a4a;
+        border-radius: 16px;
+        padding: 1.8rem;
+        margin-top: 1.5rem;
+    }
+
+    .movie-title {
+        font-family: 'Inter', sans-serif;
+        font-size: 1.7rem;
+        font-weight: 700;
+        color: #f0f0f0;
+        margin-bottom: 0.3rem;
+    }
+    .movie-meta {
+        font-family: 'Inter', sans-serif;
+        font-size: 0.85rem;
+        color: #999;
+        margin-bottom: 1rem;
+    }
+    .movie-meta span {
+        margin-right: 1rem;
+    }
+
+    .rating-badge {
+        display: inline-block;
+        background: linear-gradient(135deg, #f6d365 0%, #fda085 100%);
+        color: #1a1a2e;
+        font-weight: 700;
+        font-size: 0.85rem;
+        padding: 0.2rem 0.6rem;
+        border-radius: 6px;
+        margin-right: 0.5rem;
+    }
+
+    .section-label {
+        font-family: 'Inter', sans-serif;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #667eea;
+        margin-bottom: 0.4rem;
+        margin-top: 1.2rem;
+    }
+
+    .synopsis {
+        font-family: 'Inter', sans-serif;
+        font-size: 0.95rem;
+        color: #ccc;
+        line-height: 1.6;
+    }
+
+    .streaming-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        margin-top: 0.4rem;
+    }
+    .stream-chip {
+        font-family: 'Inter', sans-serif;
+        font-size: 0.82rem;
+        padding: 0.45rem 0.9rem;
+        border-radius: 8px;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+    .stream-chip.subscription {
+        background: rgba(72, 187, 120, 0.15);
+        border: 1px solid rgba(72, 187, 120, 0.4);
+        color: #68d391;
+    }
+    .stream-chip.free {
+        background: rgba(72, 187, 120, 0.15);
+        border: 1px solid rgba(72, 187, 120, 0.4);
+        color: #68d391;
+    }
+    .stream-chip.ads {
+        background: rgba(237, 137, 54, 0.15);
+        border: 1px solid rgba(237, 137, 54, 0.4);
+        color: #ed8936;
+    }
+    .stream-chip.rent {
+        background: rgba(99, 179, 237, 0.15);
+        border: 1px solid rgba(99, 179, 237, 0.4);
+        color: #63b3ed;
+    }
+    .stream-chip.buy {
+        background: rgba(183, 148, 244, 0.15);
+        border: 1px solid rgba(183, 148, 244, 0.4);
+        color: #b794f4;
+    }
+    .stream-chip.addon {
+        background: rgba(246, 173, 85, 0.15);
+        border: 1px solid rgba(246, 173, 85, 0.4);
+        color: #f6ad55;
+    }
+    .stream-date {
+        font-size: 0.75rem;
+        opacity: 0.8;
+    }
+
+    .no-results {
+        text-align: center;
+        color: #888;
+        font-family: 'Inter', sans-serif;
+        padding: 2rem;
+    }
+
+    div[data-testid="stTextInput"] label { display: none; }
+</style>
+""", unsafe_allow_html=True)
 
 
 def fetch_movie_info(title):
@@ -57,15 +201,14 @@ def _format_date(ts):
     return dt.strftime(f"%B {day}{suffix}, %Y")
 
 
-def format_streaming(data):
-    """Parse Streaming Availability API response into readable options."""
+def parse_streaming(data):
+    """Parse Streaming Availability API response into structured list."""
     if not data:
-        return "Streaming information unavailable."
+        return []
 
-    # API returns show object directly; no "result" wrapper
     options = data.get("streamingOptions", {}).get("us", [])
     if not options:
-        return "Not currently available for streaming in the US."
+        return []
 
     type_priority = {
         "subscription": 0, "free": 1, "ads": 2,
@@ -88,7 +231,6 @@ def format_streaming(data):
         else:
             price_formatted = ""
 
-        # Parse dates (Unix timestamps)
         date_str = ""
         available_ts = opt.get("availableSince")
         expires_ts = opt.get("expiresOn")
@@ -107,26 +249,25 @@ def format_streaming(data):
             if current[1] is None or price_amount < current[1]:
                 best[platform] = (prio, price_amount, price_formatted, mtype, date_str)
 
-    lines = []
+    label_map = {
+        "subscription": "Subscription",
+        "free": "Free",
+        "ads": "Free with Ads",
+        "rent": "Rent",
+        "buy": "Buy",
+        "addon": "Add-on",
+    }
+    results = []
     for platform in sorted(best, key=lambda p: best[p][0]):
         prio, price_val, price_fmt, mtype, date_str = best[platform]
-        label_map = {
-            "subscription": "Subscription",
-            "free": "Free",
-            "ads": "Free with Ads",
-            "rent": "Rent",
-            "buy": "Buy",
-            "addon": "Add-on",
-        }
-        label = label_map.get(mtype, mtype.capitalize())
-        line = f"{platform} ({label}{' ' + price_fmt if price_fmt else ''})"
-        if date_str:
-            line += f" - {date_str}"
-        lines.append(line)
-
-    if not lines:
-        return "Not currently available for streaming."
-    return "\n  ".join(lines)
+        results.append({
+            "platform": platform,
+            "type": mtype,
+            "label": label_map.get(mtype, mtype.capitalize()),
+            "price": price_fmt,
+            "date": date_str,
+        })
+    return results
 
 
 def truncate_plot(plot, max_sentences=3):
@@ -142,37 +283,118 @@ def truncate_plot(plot, max_sentences=3):
     return truncated
 
 
-# ---- Streamlit UI ----
-st.title("Movie Info Lookup")
+def render_streaming_chips(options):
+    """Render streaming options as styled chips."""
+    if not options:
+        return '<p style="color:#888; font-family:Inter,sans-serif; font-size:0.9rem;">No streaming options found.</p>'
+    chips = []
+    for opt in options:
+        css_class = opt["type"]
+        text = opt["platform"]
+        detail = opt["label"]
+        if opt["price"]:
+            detail += f' {opt["price"]}'
+        date_html = f'<span class="stream-date"> &middot; {opt["date"]}</span>' if opt["date"] else ""
+        chips.append(
+            f'<span class="stream-chip {css_class}">'
+            f'{text} &mdash; {detail}{date_html}'
+            f'</span>'
+        )
+    return '<div class="streaming-grid">' + "".join(chips) + '</div>'
 
-movie_name = st.text_input("Enter Movie Name:")
-if st.button("Search"):
-    if not movie_name.strip():
-        st.write("Enter a movie name.")
+
+# ---- Streamlit UI ----
+st.markdown(
+    '<div class="app-header">'
+    '<h1>movAI</h1>'
+    '<p>Search any movie. Get the details. Find where to stream it.</p>'
+    '</div>',
+    unsafe_allow_html=True,
+)
+
+col1, col2 = st.columns([5, 1])
+with col1:
+    movie_name = st.text_input("movie_search", placeholder="Search for a movie...", label_visibility="collapsed")
+with col2:
+    search_clicked = st.button("Search", use_container_width=True)
+
+if search_clicked or (movie_name and st.session_state.get("_last_search") != movie_name):
+    if not movie_name or not movie_name.strip():
+        pass
     elif not OMDB_API_KEY:
-        st.write("Error: Please set your OMDB API key in .streamlit/secrets.toml")
+        st.error("Set your OMDB API key in .streamlit/secrets.toml")
     else:
-        with st.spinner("Searching..."):
+        st.session_state["_last_search"] = movie_name
+        with st.spinner(""):
             try:
                 omdb = fetch_movie_info(movie_name)
                 if omdb.get("Response") == "False":
-                    st.write("Movie not found.")
+                    st.markdown('<p class="no-results">No movie found. Try a different title.</p>', unsafe_allow_html=True)
                 else:
                     title = omdb.get("Title", "N/A")
                     plot = truncate_plot(omdb.get("Plot", "N/A"))
                     released = omdb.get("Released", "N/A")
+                    year = omdb.get("Year", "")
+                    rated = omdb.get("Rated", "")
+                    runtime = omdb.get("Runtime", "")
+                    genre = omdb.get("Genre", "")
+                    director = omdb.get("Director", "")
+                    imdb_rating = omdb.get("imdbRating", "")
+                    poster = omdb.get("Poster", "")
                     imdb_id = omdb.get("imdbID")
 
                     streaming_data = fetch_streaming(imdb_id) if imdb_id else None
-                    streaming = format_streaming(streaming_data)
+                    streaming_opts = parse_streaming(streaming_data)
 
-                    st.text(
-                        f"Movie Title: {title}\n"
-                        f"Brief Synopsis: {plot}\n"
-                        f"Theatrical Release Date: {released}\n"
-                        f"Streaming Options: {streaming}"
-                    )
+                    # Build card
+                    meta_parts = []
+                    if year:
+                        meta_parts.append(year)
+                    if rated and rated != "N/A":
+                        meta_parts.append(rated)
+                    if runtime and runtime != "N/A":
+                        meta_parts.append(runtime)
+                    if genre:
+                        meta_parts.append(genre)
+
+                    rating_html = ""
+                    if imdb_rating and imdb_rating != "N/A":
+                        rating_html = f'<span class="rating-badge">IMDb {imdb_rating}</span>'
+
+                    director_html = ""
+                    if director and director != "N/A":
+                        director_html = f'<span style="color:#aaa;">Directed by {director}</span>'
+
+                    meta_html = " &bull; ".join(f"<span>{p}</span>" for p in meta_parts)
+
+                    streaming_html = render_streaming_chips(streaming_opts)
+
+                    card_html = f"""
+                    <div class="movie-card">
+                        <div style="display:flex; gap:1.5rem;">
+                    """
+
+                    if poster and poster != "N/A":
+                        card_html += f'<img src="{poster}" style="width:140px; height:auto; border-radius:10px; object-fit:cover; flex-shrink:0;" />'
+
+                    card_html += f"""
+                            <div style="flex:1; min-width:0;">
+                                <div class="movie-title">{title}</div>
+                                <div class="movie-meta">{rating_html} {meta_html}</div>
+                                {f'<div style="margin-bottom:0.8rem;">{director_html}</div>' if director_html else ''}
+                                <div class="section-label">Synopsis</div>
+                                <div class="synopsis">{plot}</div>
+                                <div class="section-label">Theatrical Release</div>
+                                <div class="synopsis">{released}</div>
+                            </div>
+                        </div>
+                        <div class="section-label" style="margin-top:1.4rem;">Streaming Options</div>
+                        {streaming_html}
+                    </div>
+                    """
+                    st.markdown(card_html, unsafe_allow_html=True)
+
             except requests.exceptions.RequestException:
-                st.write("Error: Could not connect. Check your internet and API keys.")
+                st.error("Could not connect. Check your internet and API keys.")
             except Exception as e:
-                st.write(f"Error: {e}")
+                st.error(f"Error: {e}")
