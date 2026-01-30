@@ -49,6 +49,14 @@ def fetch_streaming(imdb_id):
         return None
 
 
+def _format_date(ts):
+    """Format a Unix timestamp as 'February 3rd, 2026'."""
+    dt = datetime.fromtimestamp(ts)
+    day = dt.day
+    suffix = "th" if 11 <= day <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return dt.strftime(f"%B {day}{suffix}, %Y")
+
+
 def format_streaming(data):
     """Parse Streaming Availability API response into readable options."""
     if not data:
@@ -80,18 +88,14 @@ def format_streaming(data):
         else:
             price_formatted = ""
 
-        # Parse availability date if present
+        # Parse dates (Unix timestamps)
         date_str = ""
-        available_from = opt.get("availableFrom")
-        if available_from:
-            try:
-                release_date = datetime.fromisoformat(available_from.rstrip("Z"))
-                if release_date > now:
-                    day = release_date.day
-                    suffix = "th" if 11 <= day <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
-                    date_str = release_date.strftime(f"%B {day}{suffix}, %Y")
-            except (ValueError, TypeError):
-                pass
+        available_ts = opt.get("availableSince")
+        expires_ts = opt.get("expiresOn")
+        if available_ts and available_ts > now.timestamp():
+            date_str = _format_date(available_ts)
+        elif expires_ts and expires_ts > now.timestamp():
+            date_str = "until " + _format_date(expires_ts)
 
         prio = type_priority.get(mtype, 99)
         current = best.get(platform)
